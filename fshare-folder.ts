@@ -39,11 +39,15 @@ function getFolder(id: string, filename?: string) {
       });
   }
 
-  get().then(() => {
-    console.log(all);
-    const csv = all.map((link) => [link.link, link.name, ...sizeOf(link)].join(',')).join('\n');
-    console.save(csv, filename || `${folderName}.csv`);
-  });
+  const clean = loading();
+
+  get()
+    .then(() => {
+      console.log(all);
+      const csv = all.map((link) => [link.link, link.name, ...sizeOf(link)].join(',')).join('\n');
+      console.save(csv, filename || `${folderName}.csv`);
+    })
+    .finally(clean);
 }
 
 function determineCurrentFolder(): string {
@@ -67,6 +71,36 @@ function sizeOf(link: LinkObj): string[] {
   }
   const size = (link.size / MB).toFixed(2);
   return [`${size} MB`, size];
+}
+
+function loading(): () => void {
+  const ctn = document.createElement('div');
+  document.body
+    .appendChild(ctn)
+    .attachShadow({ mode: 'open' })
+    .appendChild(
+      Object.assign(document.createElement('div'), {
+        textContent: 'Loading ...',
+        style: `
+      font-weight: bold;
+      width: 200px;
+      background: #9e9e9e;
+      z-index: 321;
+      border-radius: 4px;
+      padding: 10px;
+      text-align: center;
+      color: white;
+      box-shadow: 0px 0px 3px 1px #585858;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);`,
+      })
+    );
+
+  return () => {
+    ctn.remove();
+  };
 }
 
 declare global {
