@@ -2,13 +2,39 @@ import './save';
 
 getFolder(determineCurrentFolder());
 
-function getFolder(id: string, filename?: string) {
+function mapSeries<T, R>(
+  arr: T[],
+  map: (p: T, index: number, arrayLength: number) => R | Promise<R>
+): Promise<R[]> {
+  if (!Array.isArray(arr)) throw new Error('mapSeries requires an Array');
+  const results = new Array<R>(arr.length);
+
+  return arr
+    .reduce(
+      (chain, item, i, arr) =>
+        chain
+          .then(() => map(item, i, arr.length))
+          .then((val) => {
+            results[i] = val;
+          }),
+      Promise.resolve()
+    )
+    .then(() => results);
+}
+
+function getFolderById(id: string): Promise<{ items: LinkObj[]; dirName: string }> {
   const FSELL = 'https://www.fshare.vn';
   let folderName = '';
   const types: string[] = ['folder', 'file'];
   const folder = id;
   const all: LinkObj[] = [];
-  let maxPages = 500;
+
+  function append(items: LinkObj[]) {
+    all.push(
+      ...items.map((it) => Object.assign(it, { link: `${FSELL}/${types[it.type]}/${it.linkcode}` }))
+    );
+  }
+
   function get(
     next = `/v3/files/folder?linkcode=${folder}&sort=type%2Cname&per-page=50`
   ): Promise<void> {
@@ -20,29 +46,36 @@ function getFolder(id: string, filename?: string) {
     })
       .then<ListResponse>((a) => a.json())
       .then((l) => {
+        const nextLink = l._links.next;
+        const curDirName = l.current.name;
         if (!folderName) {
           folderName = l.current.name;
         }
-        all.push(
-          ...l.items.map((it) =>
-            Object.assign(it, { link: `${FSELL}/${types[it.type]}/${it.linkcode}` })
-          )
-        );
-        if (maxPages-- === 0) {
-          return;
-        }
-        const nextLink = l._links.next;
-        if (nextLink) {
-          console.log('Getting', nextLink);
-          return get(nextLink);
-        }
+        const fileItems = l.items.filter((f) => types[f.type] === 'file');
+        append(fileItems);
+
+        const folderItems = l.items.filter((f) => types[f.type] === 'folder');
+        return mapSeries(folderItems, (item) => {
+          console.log('Getting subfolder', item.name, item.linkcode);
+          return getFolderById(item.linkcode).then((a) => a.items);
+        }).then((allDirItems) => {
+          allDirItems.forEach(append);
+          if (nextLink) {
+            console.log(`Getting ${curDirName}`, nextLink);
+            return get(nextLink);
+          }
+        });
       });
   }
 
+  return get().then(() => ({ items: all, dirName: folderName }));
+}
+
+function getFolder(id: string, filename?: string) {
   const clean = loading();
 
-  get()
-    .then(() => {
+  getFolderById(id)
+    .then(({ items: all, dirName: folderName }) => {
       console.log(all);
       const csv = all.map((link) => [link.link, link.name, ...sizeOf(link)].join(',')).join('\n');
       console.save(csv, filename || `${folderName}.csv`);
